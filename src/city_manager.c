@@ -23,7 +23,6 @@ typedef struct {
     char description[MAX_DESC];
 } Report;
 
-// --- AI Generated / Assisted Functions ---
 
 int parse_condition(const char *input, char *field, char *op, char *value) {
     if (sscanf(input, "%31[^:]:%7[^:]:%255s", field, op, value) == 3) {
@@ -58,8 +57,6 @@ int match_condition(Report *r, const char *field, const char *op, const char *va
     }
     return 0;
 }
-
-// --- End of AI Assisted Functions ---
 
 void get_permissions_string(mode_t mode, char *buf) {
     strcpy(buf, "---------");
@@ -137,19 +134,17 @@ int main(int argc, char **argv) {
     char *extra_arg = NULL;
     int filter_start = -1;
     
-    // Parse arguments like a student would
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--role") == 0 && i + 1 < argc) {
             role = argv[++i];
         } else if (strcmp(argv[i], "--user") == 0 && i + 1 < argc) {
             user = argv[++i];
         } else if (strncmp(argv[i], "--", 2) == 0 && cmd == NULL) {
-            cmd = argv[i] + 2; // getting the command without '--'
+            cmd = argv[i] + 2; 
             if (i + 1 < argc) {
                 district = argv[++i];
             }
             
-            // Grab the next argument if the command requires it
             if (strcmp(cmd, "view") == 0 || strcmp(cmd, "remove_report") == 0 || strcmp(cmd, "update_threshold") == 0) {
                 if (i + 1 < argc) {
                     extra_arg = argv[++i];
@@ -158,7 +153,7 @@ int main(int argc, char **argv) {
                 if (i + 1 < argc) {
                     filter_start = i + 1;
                 }
-                break; // The rest of the arguments are conditions for the filter
+                break;
             }
         }
     }
@@ -168,7 +163,6 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    // Call our setup function to ensure the directory and files exist with correct perms
     setup_district(district);
 
     char path[256];
@@ -178,7 +172,6 @@ int main(int argc, char **argv) {
         snprintf(path, sizeof(path), "%s/reports.dat", district);
         stat(path, &st);
         
-        // Check permissions: Manager owns the file, Inspector is in the group
         if (strcmp(role, "inspector") == 0 && !(st.st_mode & S_IWGRP)) {
             fprintf(stderr, "Permission denied: Inspector cannot write to reports.dat\n");
             return 1;
@@ -187,17 +180,15 @@ int main(int argc, char **argv) {
             return 1;
         }
 
-        // Create a dummy report to test adding
         Report r;
         memset(&r, 0, sizeof(Report));
-        r.id = (int)(time(NULL) % 10000); // Randomish ID based on time
+        r.id = (int)(time(NULL) % 10000);
         strncpy(r.inspector, user, MAX_STR - 1);
         r.severity = 2; 
         r.timestamp = time(NULL);
         strcpy(r.category, "road");
         strcpy(r.description, "Pothole detected on main street.");
         
-        // Append mode
         int fd = open(path, O_WRONLY | O_APPEND);
         if (fd >= 0) {
             write(fd, &r, sizeof(Report));
@@ -212,7 +203,6 @@ int main(int argc, char **argv) {
         snprintf(path, sizeof(path), "%s/reports.dat", district);
         
         if (stat(path, &st) == 0) {
-            // Check read perms
             if (strcmp(role, "inspector") == 0 && !(st.st_mode & S_IRGRP)) {
                 fprintf(stderr, "Permission denied.\n");
                 return 1;
@@ -287,24 +277,22 @@ int main(int argc, char **argv) {
             off_t pos = 0;
             int found = 0;
             
-            // Find the report
             while (read(fd, &r, sizeof(Report)) == sizeof(Report)) {
                 if (r.id == target_id) {
                     found = 1;
                     break;
                 }
-                pos += sizeof(Report); // keep track of byte offset
+                pos += sizeof(Report); 
             }
             
             if (found) {
-                // We found it at 'pos'. Now shift everything after it back by one Report size.
                 off_t read_pos = pos + sizeof(Report);
                 off_t write_pos = pos;
                 
                 while (1) {
                     lseek(fd, read_pos, SEEK_SET);
                     int bytes_read = read(fd, &r, sizeof(Report));
-                    if (bytes_read <= 0) break; // EOF
+                    if (bytes_read <= 0) break; 
                     
                     lseek(fd, write_pos, SEEK_SET);
                     write(fd, &r, sizeof(Report));
@@ -313,7 +301,6 @@ int main(int argc, char **argv) {
                     write_pos += sizeof(Report);
                 }
                 
-                // Truncate the file to reflect the removed record
                 fstat(fd, &st);
                 ftruncate(fd, st.st_size - sizeof(Report));
                 printf("Successfully removed report ID %d.\n", target_id);
@@ -337,7 +324,6 @@ int main(int argc, char **argv) {
         snprintf(path, sizeof(path), "%s/district.cfg", district);
         stat(path, &st);
         
-        // Strict bitwise check for exactly 0640
         if ((st.st_mode & 0777) != 0640) {
             fprintf(stderr, "Diagnostic Warning: Permission bits on district.cfg are not 640! Refusing to write.\n");
             return 1;
@@ -364,14 +350,13 @@ int main(int argc, char **argv) {
             while (read(fd, &r, sizeof(Report)) == sizeof(Report)) {
                 int matches_all = 1;
                 
-                // If there are condition arguments, apply AI parsing/matching logic
                 if (filter_start != -1) {
                     for (int i = filter_start; i < argc; i++) {
                         char field[32] = {0}, op[8] = {0}, val[256] = {0};
                         
                         if (parse_condition(argv[i], field, op, val)) {
                             if (!match_condition(&r, field, op, val)) {
-                                matches_all = 0; // failed this condition
+                                matches_all = 0; 
                                 break;
                             }
                         } else {
