@@ -134,14 +134,32 @@ int main(int argc, char **argv) {
     char *user = NULL;
     char *cmd = NULL;
     char *district = NULL;
+    char *extra_arg = NULL;
+    int filter_start = -1;
     
-    // Simplistic argument parsing
+    // Parse arguments like a student would
     for (int i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "--role") == 0 && i + 1 < argc) role = argv[++i];
-        else if (strcmp(argv[i], "--user") == 0 && i + 1 < argc) user = argv[++i];
-        else if (strncmp(argv[i], "--", 2) == 0 && cmd == NULL) {
-            cmd = argv[i] + 2;
-            if (i + 1 < argc) district = argv[++i];
+        if (strcmp(argv[i], "--role") == 0 && i + 1 < argc) {
+            role = argv[++i];
+        } else if (strcmp(argv[i], "--user") == 0 && i + 1 < argc) {
+            user = argv[++i];
+        } else if (strncmp(argv[i], "--", 2) == 0 && cmd == NULL) {
+            cmd = argv[i] + 2; // getting the command without '--'
+            if (i + 1 < argc) {
+                district = argv[++i];
+            }
+            
+            // Grab the next argument if the command requires it
+            if (strcmp(cmd, "view") == 0 || strcmp(cmd, "remove_report") == 0 || strcmp(cmd, "update_threshold") == 0) {
+                if (i + 1 < argc) {
+                    extra_arg = argv[++i];
+                }
+            } else if (strcmp(cmd, "filter") == 0) {
+                if (i + 1 < argc) {
+                    filter_start = i + 1;
+                }
+                break; // The rest of the arguments are conditions for the filter
+            }
         }
     }
 
@@ -150,64 +168,232 @@ int main(int argc, char **argv) {
         return 1;
     }
 
+    // Call our setup function to ensure the directory and files exist with correct perms
     setup_district(district);
 
+    char path[256];
+    struct stat st;
+
     if (strcmp(cmd, "add") == 0) {
-        char path[256];
         snprintf(path, sizeof(path), "%s/reports.dat", district);
-        struct stat st;
         stat(path, &st);
+        
+        // Check permissions: Manager owns the file, Inspector is in the group
         if (strcmp(role, "inspector") == 0 && !(st.st_mode & S_IWGRP)) {
-            fprintf(stderr, "Permission denied.\n");
+            fprintf(stderr, "Permission denied: Inspector cannot write to reports.dat\n");
+            return 1;
+        } else if (strcmp(role, "manager") == 0 && !(st.st_mode & S_IWUSR)) {
+            fprintf(stderr, "Permission denied: Manager cannot write to reports.dat\n");
             return 1;
         }
 
-        Report r = {0};
-        r.id = time(NULL) % 10000;
+        // Create a dummy report to test adding
+        Report r;
+        memset(&r, 0, sizeof(Report));
+        r.id = (int)(time(NULL) % 10000); // Randomish ID based on time
         strncpy(r.inspector, user, MAX_STR - 1);
-        r.severity = 2; // Default mock values
+        r.severity = 2; 
         r.timestamp = time(NULL);
         strcpy(r.category, "road");
+        strcpy(r.description, "Pothole detected on main street.");
         
+        // Append mode
         int fd = open(path, O_WRONLY | O_APPEND);
         if (fd >= 0) {
             write(fd, &r, sizeof(Report));
             close(fd);
+            printf("Successfully added report %d to %s\n", r.id, district);
             try_log_action(district, role, user, "add");
+        } else {
+            perror("Failed to open reports.dat for writing");
         }
+
     } else if (strcmp(cmd, "list") == 0) {
-        char path[256];
         snprintf(path, sizeof(path), "%s/reports.dat", district);
-        struct stat st;
+        
         if (stat(path, &st) == 0) {
+            // Check read perms
+            if (strcmp(role, "inspector") == 0 && !(st.st_mode & S_IRGRP)) {
+                fprintf(stderr, "Permission denied.\n");
+                return 1;
+            }
+            
             char perms[10];
             get_permissions_string(st.st_mode, perms);
-            printf("File: %s | Perms: %s | Size: %ld | MTime: %ld\n", path, perms, st.st_size, st.st_mtime);
+            printf("File: %s | Perms: %s | Size: %ld bytes | Last Modified: %ld\n", path, perms, st.st_size, st.st_mtime);
             
             int fd = open(path, O_RDONLY);
             if (fd >= 0) {
                 Report r;
+                int count = 0;
                 while (read(fd, &r, sizeof(Report)) == sizeof(Report)) {
-                    printf("Report %d | %s | %s | Sev: %d\n", r.id, r.category, r.inspector, r.severity);
+                    printf("[%d] ID: %d | Category: %s | Inspector: %s | Severity: %d\n", ++count, r.id, r.category, r.inspector, r.severity);
                 }
                 close(fd);
+                if (count == 0) printf("No reports found.\n");
             }
+        } else {
+            perror("stat failed");
         }
         try_log_action(district, role, user, "list");
-    } else if (strcmp(cmd, "filter") == 0) {
-        char path[256];
+
+    } else if (strcmp(cmd, "view") == 0) {
+        if (!extra_arg) {
+            fprintf(stderr, "Error: view requires a report ID.\n");
+            return 1;
+        }
+        int target_id = atoi(extra_arg);
         snprintf(path, sizeof(path), "%s/reports.dat", district);
+        
         int fd = open(path, O_RDONLY);
         if (fd >= 0) {
             Report r;
+            int found = 0;
             while (read(fd, &r, sizeof(Report)) == sizeof(Report)) {
-                // Check all conditions in remaining argv
-                // Logic simplifed for mock
-                printf("Matching Report %d\n", r.id);
+                if (r.id == target_id) {
+                    printf("--- Report Details ---\n");
+                    printf("ID:          %d\n", r.id);
+                    printf("Inspector:   %s\n", r.inspector);
+                    printf("Category:    %s\n", r.category);
+                    printf("Severity:    %d\n", r.severity);
+                    printf("Timestamp:   %ld\n", r.timestamp);
+                    printf("Description: %s\n", r.description);
+                    printf("----------------------\n");
+                    found = 1;
+                    break;
+                }
+            }
+            close(fd);
+            if (!found) printf("Report %d not found.\n", target_id);
+        }
+        try_log_action(district, role, user, "view");
+
+    } else if (strcmp(cmd, "remove_report") == 0) {
+        if (strcmp(role, "manager") != 0) {
+            fprintf(stderr, "Permission denied: Only managers can remove reports.\n");
+            return 1;
+        }
+        if (!extra_arg) {
+            fprintf(stderr, "Error: remove_report requires a report ID.\n");
+            return 1;
+        }
+        
+        int target_id = atoi(extra_arg);
+        snprintf(path, sizeof(path), "%s/reports.dat", district);
+        
+        int fd = open(path, O_RDWR);
+        if (fd >= 0) {
+            Report r;
+            off_t pos = 0;
+            int found = 0;
+            
+            // Find the report
+            while (read(fd, &r, sizeof(Report)) == sizeof(Report)) {
+                if (r.id == target_id) {
+                    found = 1;
+                    break;
+                }
+                pos += sizeof(Report); // keep track of byte offset
+            }
+            
+            if (found) {
+                // We found it at 'pos'. Now shift everything after it back by one Report size.
+                off_t read_pos = pos + sizeof(Report);
+                off_t write_pos = pos;
+                
+                while (1) {
+                    lseek(fd, read_pos, SEEK_SET);
+                    int bytes_read = read(fd, &r, sizeof(Report));
+                    if (bytes_read <= 0) break; // EOF
+                    
+                    lseek(fd, write_pos, SEEK_SET);
+                    write(fd, &r, sizeof(Report));
+                    
+                    read_pos += sizeof(Report);
+                    write_pos += sizeof(Report);
+                }
+                
+                // Truncate the file to reflect the removed record
+                fstat(fd, &st);
+                ftruncate(fd, st.st_size - sizeof(Report));
+                printf("Successfully removed report ID %d.\n", target_id);
+            } else {
+                printf("Report ID %d not found.\n", target_id);
             }
             close(fd);
         }
+        try_log_action(district, role, user, "remove_report");
+
+    } else if (strcmp(cmd, "update_threshold") == 0) {
+        if (strcmp(role, "manager") != 0) {
+            fprintf(stderr, "Permission denied: Manager role required.\n");
+            return 1;
+        }
+        if (!extra_arg) {
+            fprintf(stderr, "Error: Missing threshold value.\n");
+            return 1;
+        }
+        
+        snprintf(path, sizeof(path), "%s/district.cfg", district);
+        stat(path, &st);
+        
+        // Strict bitwise check for exactly 0640
+        if ((st.st_mode & 0777) != 0640) {
+            fprintf(stderr, "Diagnostic Warning: Permission bits on district.cfg are not 640! Refusing to write.\n");
+            return 1;
+        }
+        
+        int fd = open(path, O_WRONLY | O_TRUNC);
+        if (fd >= 0) {
+            char buf[32];
+            snprintf(buf, sizeof(buf), "THRESHOLD=%s\n", extra_arg);
+            write(fd, buf, strlen(buf));
+            close(fd);
+            printf("Threshold updated to %s.\n", extra_arg);
+        }
+        try_log_action(district, role, user, "update_threshold");
+
+    } else if (strcmp(cmd, "filter") == 0) {
+        snprintf(path, sizeof(path), "%s/reports.dat", district);
+        
+        int fd = open(path, O_RDONLY);
+        if (fd >= 0) {
+            Report r;
+            int found_any = 0;
+            
+            while (read(fd, &r, sizeof(Report)) == sizeof(Report)) {
+                int matches_all = 1;
+                
+                // If there are condition arguments, apply AI parsing/matching logic
+                if (filter_start != -1) {
+                    for (int i = filter_start; i < argc; i++) {
+                        char field[32] = {0}, op[8] = {0}, val[256] = {0};
+                        
+                        if (parse_condition(argv[i], field, op, val)) {
+                            if (!match_condition(&r, field, op, val)) {
+                                matches_all = 0; // failed this condition
+                                break;
+                            }
+                        } else {
+                            fprintf(stderr, "Warning: failed to parse condition '%s'\n", argv[i]);
+                            matches_all = 0;
+                            break;
+                        }
+                    }
+                }
+                
+                if (matches_all) {
+                    printf("-> Report %d matches filter! (Category: %s, Sev: %d, Inspector: %s)\n", r.id, r.category, r.severity, r.inspector);
+                    found_any = 1;
+                }
+            }
+            close(fd);
+            if (!found_any) printf("No reports matched the given conditions.\n");
+        }
         try_log_action(district, role, user, "filter");
+
+    } else {
+        fprintf(stderr, "Unknown command: %s\n", cmd);
     }
 
     return 0;
