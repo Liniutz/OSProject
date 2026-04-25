@@ -25,7 +25,7 @@ typedef struct {
 
 
 int parse_condition(const char *input, char *field, char *op, char *value) {
-    if (sscanf(input, "%31[^:]:%7[^:]:%255s", field, op, value) == 3) {
+    if (sscanf(input, "%31[^:]:%7[^:]:%255[^:]", field, op, value) == 3) {
         return 1;
     }
     return 0;
