@@ -9,6 +9,7 @@
 #include <sys/wait.h>
 #include <time.h>
 #include <dirent.h>
+#include <signal.h>
 
 #define MAX_STR 32
 #define MAX_DESC 256
@@ -196,6 +197,37 @@ int main(int argc, char **argv) {
             close(fd);
             printf("Successfully added report %d to %s\n", r.id, district);
             try_log_action(district, role, user, "add");
+
+            int monitor_success = 0;
+            int pid_fd = open(".monitor_pid", O_RDONLY);
+            if (pid_fd >= 0) {
+                char pid_buf[32];
+                memset(pid_buf, 0, sizeof(pid_buf));
+                int n = read(pid_fd, pid_buf, sizeof(pid_buf) - 1);
+                close(pid_fd);
+                if (n > 0) {
+                    pid_t monitor_pid = atoi(pid_buf);
+                    if (monitor_pid > 0 && kill(monitor_pid, SIGUSR1) == 0) {
+                        monitor_success = 1;
+                    }
+                }
+            }
+
+            char log_path[256];
+            snprintf(log_path, sizeof(log_path), "%s/logged_district", district);
+            int log_fd = open(log_path, O_WRONLY | O_APPEND);
+            if (log_fd >= 0) {
+                char msg[256];
+                int len;
+                if (monitor_success) {
+                    len = snprintf(msg, sizeof(msg), "Monitor was successfully informed of the new report.\n");
+                } else {
+                    len = snprintf(msg, sizeof(msg), "Monitor could not be informed of the event.\n");
+                }
+                write(log_fd, msg, len);
+                close(log_fd);
+            }
+
         } else {
             perror("Failed to open reports.dat for writing");
         }
