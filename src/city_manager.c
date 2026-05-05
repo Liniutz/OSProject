@@ -6,6 +6,7 @@
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <sys/wait.h>
 #include <time.h>
 #include <dirent.h>
 
@@ -376,6 +377,28 @@ int main(int argc, char **argv) {
             if (!found_any) printf("No reports matched the given conditions.\n");
         }
         try_log_action(district, role, user, "filter");
+
+    } else if (strcmp(cmd, "remove_district") == 0) {
+        if (strcmp(role, "manager") != 0) {
+            fprintf(stderr, "Permission denied: Only managers can remove districts.\n");
+            return 1;
+        }
+
+        char symlink_name[256];
+        snprintf(symlink_name, sizeof(symlink_name), "active_reports-%s", district);
+        unlink(symlink_name);
+
+        pid_t pid = fork();
+        if (pid == 0) {
+            execlp("rm", "rm", "-rf", district, NULL);
+            perror("execlp");
+            exit(1);
+        } else if (pid > 0) {
+            waitpid(pid, NULL, 0);
+            printf("Successfully removed district %s.\n", district);
+        } else {
+            perror("fork");
+        }
 
     } else {
         fprintf(stderr, "Unknown command: %s\n", cmd);

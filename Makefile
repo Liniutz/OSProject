@@ -1,6 +1,6 @@
 CC = gcc
 CFLAGS = -Wall -Wextra -std=c11 -g
-TARGET = city_manager
+TARGET = city_manager_output
 
 all: $(TARGET)
 
