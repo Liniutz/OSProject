@@ -55,9 +55,7 @@ int main(int argc, char *argv[]) {
 
         char line1[512];
         char line2[512];
-        // Read first line (often "report" or id) and second line (csv details)
         if (fgets(line1, sizeof(line1), f) && fgets(line2, sizeof(line2), f)) {
-            // line 2 format expected: id,inspector,severity,description
             char *id = strtok(line2, ",");
             char *inspector = strtok(NULL, ",");
             char *severity_str = strtok(NULL, ",");
