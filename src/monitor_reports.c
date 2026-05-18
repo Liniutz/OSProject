@@ -6,27 +6,45 @@
 #include <sys/types.h>
 #include <fcntl.h>
 #include <string.h>
+#include <errno.h>
 
 const char *PID_FILE_NAME = ".monitor_pid";
 
 void handle_sigint(int sig) {
     if (unlink(PID_FILE_NAME) == 0) {
-        printf("\nReceived SIGINT. Deleted %s and terminating successfully.\n", PID_FILE_NAME);
+        printf("END: Received SIGINT. Deleted %s and terminating successfully.\n", PID_FILE_NAME);
     } else {
-        printf("\nReceived SIGINT, but failed to delete %s.\n", PID_FILE_NAME);
+        printf("END: Received SIGINT, but failed to delete %s.\n", PID_FILE_NAME);
     }
+    fflush(stdout);
     exit(0);
 }
 
-
 void handle_sigusr1(int sig) {
-    printf("A new report has been added.\n");
+    printf("MSG: A new report has been added.\n");
+    fflush(stdout);
 }
 
 int main(void) {
+    setvbuf(stdout, NULL, _IONBF, 0);
+
+    // Check if monitor is already running
+    int fd = open(PID_FILE_NAME, O_RDONLY);
+    if (fd >= 0) {
+        char pid_str[32];
+        int bytes = read(fd, pid_str, sizeof(pid_str) - 1);
+        if (bytes > 0) {
+            pid_str[bytes] = '\0';
+            printf("ERR: Monitor already running with PID %d\n", atoi(pid_str));
+            fflush(stdout);
+        }
+        close(fd);
+        exit(1);
+    }
+
     pid_t pid = getpid();
     
-    int fd = open(PID_FILE_NAME, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    fd = open(PID_FILE_NAME, O_WRONLY | O_CREAT | O_TRUNC, 0644);
     if (fd < 0) {
         perror("Error creating .monitor_pid");
         exit(EXIT_FAILURE);
@@ -37,8 +55,9 @@ int main(void) {
     write(fd, pid_str, len);
     close(fd);
     
-    printf("monitor_reports started with PID %d.\n", pid);
-    printf("Waiting for signals (SIGUSR1 to notify, SIGINT to quit)...\n");
+    printf("START: monitor_reports started with PID %d.\n", pid);
+    printf("MSG: Waiting for signals (SIGUSR1 to notify, SIGINT to quit)...\n");
+    fflush(stdout);
 
     struct sigaction sa_int, sa_usr1;
 

@@ -1,0 +1,2 @@
+report
+3,InspectorA,2,Issue 3
